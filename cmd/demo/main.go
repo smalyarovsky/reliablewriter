@@ -22,8 +22,8 @@ func main() {
 	rw := reliablewriter.NewReliableWriter(
 		ctx,
 		uw,
-		8*1024,  // minChunk
-		32*1024, // maxChunk
+		8*1024,
+		32*1024,
 	)
 
 	dataSize := 200 * 1024
@@ -33,7 +33,7 @@ func main() {
 	}
 
 	off := int64(0)
-	step := 5000 // специально не кратно minChunk, чтобы были разные остатки
+	step := 5000
 	for off < int64(len(src)) {
 		end := off + int64(step)
 		if end > int64(len(src)) {
@@ -56,7 +56,6 @@ func main() {
 
 	if !bytes.Equal(out, src) {
 		fmt.Printf("FAIL: data mismatch (out=%d, src=%d)\n", len(out), len(src))
-		// маленький хелп для дебага: найти первое отличие
 		n := min(len(out), len(src))
 		for i := 0; i < n; i++ {
 			if out[i] != src[i] {

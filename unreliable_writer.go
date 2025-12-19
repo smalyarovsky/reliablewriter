@@ -18,12 +18,11 @@ type UnreliableWriter interface {
 	Abort(ctx context.Context)
 }
 
-// FileUnreliableWriter: пишет в файл, иногда делает частичную запись и возвращает ошибку.
 type FileUnreliableWriter struct {
 	mu       sync.Mutex
 	f        *os.File
-	size     int64   // "сколько байт записано" (монолитно слева направо)
-	failProb float64 // вероятность "вставить ошибку" на write
+	size     int64
+	failProb float64
 	rnd      *rand.Rand
 
 	aborted   bool
@@ -66,25 +65,22 @@ func (w *FileUnreliableWriter) WriteAt(ctx context.Context, chunkBegin, chunkEnd
 		return nil
 	}
 
-	// Симулируем: иногда пишем только часть и возвращаем ошибку.
 	toWrite := int64(total)
 	partialFail := false
 	if w.rnd.Float64() < w.failProb && toWrite > 0 {
 		partialFail = true
 		if toWrite > 1 {
-			toWrite = 1 + w.rnd.Int63n(toWrite-1) // [1..total-1]
+			toWrite = 1 + w.rnd.Int63n(toWrite-1)
 		} else {
 			toWrite = 1
 		}
 	}
 
-	// Пишем из буфера строго первые toWrite байт.
 	n, err := writeFromSGBufferAt(w.f, buf, off, toWrite)
 	if err != nil {
 		return err
 	}
 
-	// Обновляем "размер" только если пишем в хвост (последовательно).
 	end := off + n
 
 	w.mu.Lock()
@@ -121,7 +117,7 @@ func (w *FileUnreliableWriter) GetResumeOffset(ctx context.Context, chunkBegin, 
 		return 0, errors.New("unreliable writer aborted")
 	}
 	if completed {
-		// пусть будет ок, но можно и ошибку
+		return 0, errors.New("unreliable writer completed")
 	}
 
 	if size <= chunkBegin {
@@ -192,7 +188,7 @@ func writeFromSGBufferAt(f *os.File, buf *SGBuffer, off int64, limit int64) (int
 	curOff := off
 	var written int64
 
-	for _, seg := range buf.bufs { // читаем напрямую
+	for _, seg := range buf.bufs {
 		if remaining <= 0 {
 			break
 		}
