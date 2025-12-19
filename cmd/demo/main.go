@@ -23,10 +23,10 @@ func main() {
 		ctx,
 		uw,
 		8*1024,
-		32*1024,
+		256*1024,
 	)
 
-	dataSize := 200 * 1024
+	dataSize := 1000 * 1024
 	src := make([]byte, dataSize)
 	for i := range src {
 		src[i] = byte(i % 251)
@@ -66,5 +66,5 @@ func main() {
 		return
 	}
 
-	fmt.Printf("OK: wrote %d bytes reliably into output.bin (failProb=%.2f)\n", len(src), 0.10)
+	fmt.Printf("OK: wrote %d bytes reliably into output.bin (failProb=%.2f)\n", len(src), 0.30)
 }

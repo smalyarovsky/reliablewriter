@@ -110,10 +110,9 @@ func (w *ReliableWriter) tryStartUpload() {
 }
 
 func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuffer) {
-	// TODO handle different errors, don't retry those that don't make sense to retry
 	localOffset := int64(0)
 	maxAttempts := 10
-	maxBackoff := 30 * time.Second
+	maxBackoff := (20 << 10) * time.Millisecond
 
 	advance := false
 	defer func() {
@@ -125,15 +124,18 @@ func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuff
 		w.mu.Unlock()
 	}()
 
-	backoff := time.Second
+	backoff := 20 * time.Millisecond
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if w.ctx.Err() != nil {
 			w.setErr(w.ctx.Err())
 			return
 		}
-
+		if err := w.uw.WriteAt(w.ctx, chunkBegin, chunkEnd, chunk, chunkBegin+localOffset); err == nil {
+			advance = true
+			return
+		}
+		// TODO check error type to decide whether to retry or not
 		backoffResume := time.Second
-		// TODO store result of previous Write and don't query if it didn't fail
 		resume, err := w.uw.GetResumeOffset(w.ctx, chunkBegin, chunkEnd)
 		for attemptResume := 1; err != nil && attemptResume < maxAttempts; attemptResume++ {
 			if w.ctx.Err() != nil {
@@ -170,12 +172,6 @@ func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuff
 		}
 
 		if chunk.Len() == 0 {
-			advance = true
-			return
-		}
-
-		err = w.uw.WriteAt(w.ctx, chunkBegin, chunkEnd, chunk, chunkBegin+localOffset)
-		if err == nil {
 			advance = true
 			return
 		}
