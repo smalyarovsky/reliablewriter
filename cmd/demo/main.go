@@ -14,7 +14,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	uw, err := reliablewriter.NewFileUnreliableWriter("output.bin", 0.30)
+	uw, err := reliablewriter.NewFileUnreliableWriter("output.bin", 1e-5)
 	if err != nil {
 		panic(err)
 	}

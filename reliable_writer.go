@@ -52,7 +52,7 @@ func (w *ReliableWriter) WriteAt(ctx context.Context, p []byte, off int64) error
 	}
 	if w.closed {
 		defer w.mu.Unlock()
-		return errors.New("writer closed")
+		return ErrClosed
 	}
 	if off != w.nextOff {
 		defer w.mu.Unlock()
@@ -110,10 +110,6 @@ func (w *ReliableWriter) tryStartUpload() {
 }
 
 func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuffer) {
-	localOffset := int64(0)
-	maxAttempts := 10
-	maxBackoff := (20 << 10) * time.Millisecond
-
 	advance := false
 	defer func() {
 		w.mu.Lock()
@@ -124,7 +120,9 @@ func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuff
 		w.mu.Unlock()
 	}()
 
-	backoff := 20 * time.Millisecond
+	localOffset := int64(0)
+	maxAttempts := 10
+	backoff := NewBackoff(500*time.Millisecond, 1.5, 5*time.Second)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if w.ctx.Err() != nil {
 			w.setErr(w.ctx.Err())
@@ -134,20 +132,22 @@ func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuff
 			advance = true
 			return
 		}
-		// TODO check error type to decide whether to retry or not
-		backoffResume := time.Second
+		backoffResume := NewBackoff(500*time.Millisecond, 1.5, 5*time.Second)
 		resume, err := w.uw.GetResumeOffset(w.ctx, chunkBegin, chunkEnd)
 		for attemptResume := 1; err != nil && attemptResume < maxAttempts; attemptResume++ {
 			if w.ctx.Err() != nil {
 				w.setErr(w.ctx.Err())
 				return
 			}
-			if err := sleepCtx(w.ctx, backoffResume); err != nil {
+			var re *RetryableError
+			if !errors.As(err, &re) {
+				w.setErr(w.ctx.Err())
+				return
+			}
+			if err := backoffResume.Wait(w.ctx); err != nil {
 				w.setErr(err)
 				return
 			}
-			// TODO jitter inside separate struct
-			backoffResume = min(backoffResume*2, maxBackoff)
 			resume, err = w.uw.GetResumeOffset(w.ctx, chunkBegin, chunkEnd)
 		}
 
@@ -176,26 +176,12 @@ func (w *ReliableWriter) persistUpload(chunkBegin, chunkEnd int64, chunk *SGBuff
 			return
 		}
 
-		// TODO jitter inside separate struct
-		if err := sleepCtx(w.ctx, backoff); err != nil {
+		if err := backoff.Wait(w.ctx); err != nil {
 			w.setErr(err)
 			return
 		}
-		backoff = min(backoff*2, maxBackoff)
 	}
-	w.setErr(errors.New("max retry attempts exceeded"))
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-
-	select {
-	case <-t.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	w.setErr(ErrMaxRetries)
 }
 
 func (w *ReliableWriter) setErr(err error) {
